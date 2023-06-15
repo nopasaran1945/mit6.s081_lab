@@ -1,0 +1,47 @@
+//syscall 
+uint64
+sys_sysinfo(){
+  struct sysinfo sys;
+  uint64 user_sys;
+
+  argaddr(0,&user_sys); //arg from user
+  nfree(&sys);
+  nprocess(&sys);
+  printf("kernel : freemem : %d , free_process:%d \n ",sys.freemem,sys.nproc);
+  copyout(myproc()->pagetable,user_sys,(char*)&sys,sizeof(struct sysinfo));
+  return 0;
+}
+//in kalloc.c
+//count free mem
+int 
+nfree(struct sysinfo *sys){
+  if(sys==0){
+    printf("wrong addr of argument(pointer)");
+    return -1;
+  }
+  unsigned int num_free = 0;
+  struct run * wp = kmem.freelist;
+  while(wp!=0){
+    num_free++;
+    wp = wp->next;
+  }
+  sys->freemem = num_free;
+  return 0;
+}
+//in proc.c 
+//count processes that aren't 
+int 
+nprocess(struct sysinfo *sys){
+  if(sys==0){
+    printf("error:nprocess:sys is null\n");
+    return -1;
+  }
+  struct proc *p;
+  unsigned int count = 0;
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state != UNUSED)
+      count++;
+  }
+  sys->nproc = count;
+  return 0;
+}
