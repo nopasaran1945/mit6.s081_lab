@@ -1,3 +1,11 @@
+// user syscall
+struct sysinfo;
+int 
+sysinfo(struct sysinfo *sys);
+
+
+
+
 //syscall 
 uint64
 sys_sysinfo(){
