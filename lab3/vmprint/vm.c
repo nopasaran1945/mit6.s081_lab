@@ -29,7 +29,7 @@ int vmprint(pagetable_t page)
           for(int k = 0;k<512;k++){//level 0 
             pte = (pte_t)p0[k];
             if(pte&PTE_V){  
-            printf(".. .. ..%d: pte %p pa %p \n",k,pte,PTE2PA(pte));
+            printf(".. .. ..%d: pte %p pa %p\n",k,pte,PTE2PA(pte));
             }
           }
         }
