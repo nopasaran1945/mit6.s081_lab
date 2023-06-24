@@ -35,7 +35,6 @@ int vmprint(pagetable_t page)
         }
       }
     }
-
   }
 
   return 0;
