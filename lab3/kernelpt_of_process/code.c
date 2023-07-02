@@ -117,5 +117,61 @@ found:
   p->context.sp = p->kstack + PGSIZE;
 
   return p;
+}
 
+//free a page table but dont free the leaf physical mem pages
+void 
+freept(pagetable_t pagetable){
+  if(!pagetable){
+    panic("freept");
+    return;
+  }
+  pagetable_t p2=pagetable;
+  pagetable_t p1;
+  pte_t pte;
+  for(int i = 0;i<512;i++){
+    pte = (pte_t)p2[i];
+    if(pte&PTE_V){
+    p1 = (pagetable_t)PTE2PA(pte);
+    for(int j = 0;j<512;j++){
+      pte = (pte_t)p1[j];
+      if(pte&PTE_V){
+        kfree((void*)PTE2PA(pte));
+      }
+    }
+    kfree((void*)PTE2PA((pte_t)p2[i]));
+    }
+  }
+  kfree((void*)pagetable);
+}
+
+//in proc.c
+//modified freeproc
+//free the kernel page table of process
+static void
+freeproc(struct proc *p)
+{
+  if(p->trapframe)
+    kfree((void*)p->trapframe);
+  p->trapframe = 0;
+  if(p->pagetable)
+    proc_freepagetable(p->pagetable, p->sz);
+  p->pagetable = 0;
+  p->sz = 0;
+  p->pid = 0;
+  p->parent = 0;
+  p->name[0] = 0;
+  p->chan = 0;
+  p->killed = 0;
+  p->xstate = 0;
+  p->state = UNUSED;
+  if(p->kstack){
+    pte_t *pte = walk(p->kernelpt,p->kstack,0);
+    if(!pte)
+    panic("freeproc:free kstack");
+    kfree((void*)PTE2PA(*pte));
+    p->kstack = (uint64)0;
+  }
+  freept(p->kernelpt);
+  p->kernelpt = 0;
 }
