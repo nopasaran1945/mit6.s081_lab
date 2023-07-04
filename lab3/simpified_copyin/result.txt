@@ -144,3 +144,9 @@ test iref: OK
 test forktest: OK
 test bigdir: OK
 ALL TESTS PASSED
+
+
+
+
+make grade 的速度太慢结果time out ，最后usertests 跑出来的结果无误
+copyin test以及copyinstr1,2,3 test ,sbrkmuch都是成功的 ，我也就不去管make grade了
