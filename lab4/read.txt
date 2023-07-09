@@ -1,0 +1,57 @@
+这一节是关于TRAP的内容
+必要的硬件知识（pagetable已经在前边LAB3说明过了）
+risc-v isa knowledge:( it is similar to mips)
+registers about TRAP:
+scause,stvec,sepc,sscratch，sstatus：
+scause:TRAP陷入的原因，可以通过查表看到各种原因：比如缺页
+sepc：TRAP陷入的指令的地址,也就是陷入TRAP指令时的PC值
+sscratch:做一些重要的数据操作，比较重要，和TRAPFRAME相关
+sstatus：里边有个SIE位来控制开中断与关中断（除了定时器中断之外）
+
+the whole progress of the usertrap:
+在最开始首先是RISC-V的硬件架构开始工作，在这里是用的一个特殊的指令：ECALL ，它完成的工作相当简单：
+1：切换状态：USER MODE 到 SUPERVISOR MODE（在408里直接叫内核态）
+2：将PC保存到SEPC 
+3: 将STVEC寄存器的内容拷贝到PC寄存器
+在之前LAB3和PAGETABLE相关的课程里边可以看到每个进程用户页表最上面的虚拟地址映射的是TRAMPOLINE PAGE
+同样巧合的是KERNEL PAGETABLE 的 MAXVA那边是TRAMPOLINE PAGE，此种巧合是一种跳板设计，放在后便再详细说明
+STVEC里保存的是TRAMPOLINE的地址，接下来切换到内核页表之前所要做的一些工作所对应的指令就放在这个地方
+KERNEL里边有各种各样的函数，他们的工作也依赖用户寄存器，但是如果想要回到用户态的时候原来的函数可以不被影响，那么原来用户态的寄存器状态就该保存下来并且再切换回去的时候完成还原
+这样才不会影响其工作流程。TRAMPOLINE.S里边的代码也说明了这一点：
+# save the user registers in TRAPFRAME
+        sd ra, 40(a0)
+        sd sp, 48(a0)
+        sd gp, 56(a0)
+        sd tp, 64(a0)
+        sd t0, 72(a0)
+        sd t1, 80(a0)
+        sd t2, 88(a0)
+        sd s0, 96(a0)
+        sd s1, 104(a0)
+        sd a1, 120(a0)
+        sd a2, 128(a0)
+        sd a3, 136(a0)
+        sd a4, 144(a0)
+        sd a5, 152(a0)
+        sd a6, 160(a0)
+        sd a7, 168(a0)
+        sd s2, 176(a0)
+        sd s3, 184(a0)
+        sd s4, 192(a0)
+        sd s5, 200(a0)
+        sd s6, 208(a0)
+        sd s7, 216(a0)
+        sd s8, 224(a0)
+        sd s9, 232(a0)
+        sd s10, 240(a0)
+        sd s11, 248(a0)
+        sd t3, 256(a0)
+        sd t4, 264(a0)
+        sd t5, 272(a0)
+        sd t6, 280(a0)
+
+可以看到，以上的指令做的正是保存寄存器数据的操作，但是仔细观察我们可以想一下这东西保存到了哪里，首先这是一个偏移地址，以a0寄存器数据为基址进行的偏移
+那么a0里边是什么？
+再仔细看看可以发现前边还有一个指令需要我们关注一下：
+csrrw a0, sscratch, a0
+这东西是干啥用的？其实做的事情很简单，将SSCRATCH寄存器的数据和A0进行了一个互换，A0数据跑到了SSCRATCH里边，SSCRATCH数据跑到了A0里边
