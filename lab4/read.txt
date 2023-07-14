@@ -126,4 +126,4 @@ struct proc *p = myproc();
 
 USERRET：
 这时候A0寄存器有TRAPFRAME地址，A1有SATP寄存器的值
-接下来切换PAGETABLE，把A1内容写入SATP寄存器,还原
+接下来切换PAGETABLE，把A1内容写入SATP寄存器,还原各用户寄存器
