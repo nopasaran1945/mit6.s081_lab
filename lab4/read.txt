@@ -55,3 +55,75 @@ KERNEL里边有各种各样的函数，他们的工作也依赖用户寄存器�
 再仔细看看可以发现前边还有一个指令需要我们关注一下：
 csrrw a0, sscratch, a0
 这东西是干啥用的？其实做的事情很简单，将SSCRATCH寄存器的数据和A0进行了一个互换，A0数据跑到了SSCRATCH里边，SSCRATCH数据跑到了A0里边
+原来的SSCRATCH寄存器内容是被内核设置好的TRAPFRAME地址。
+具体的说，SSCRATCH寄存器是在最后返回用户态的时候设置好的
+如下：
+void
+usertrapret(void)
+{
+  .......
+  uint64 fn = TRAMPOLINE + (userret - trampoline);
+  ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);
+}
+在usertrapret的最后用个函数指针，然后传入了参数：TRAPFRAME，和satp
+我们可以看到，TRAPFRAME 此时在A0寄存器，satp在A1寄存器
+trampoline.s:
+... ...
+# restore user a0, and save TRAPFRAME in sscratch
+        csrrw a0, sscratch, a0
+        
+        # return to user mode and user pc.
+        # usertrapret() set up sstatus and sepc.
+        sret
+最后交换了A0寄存器的值和SSCRATCH寄存器的值
+此时SSCRATCH中就是TRAPFRAME，A0中的就是原来SSCRATCH的内容（具体是什么还不知道）
+再往下：
+csrr t0, sscratch
+sd t0, 112(a0)
+可以看到，在保存完了用户寄存器之后，A0里边的内容是TRAMPFRAME的地址，此时SSCRATCH里的A0寄存器内容要保存下来
+因此将SSCRATCH里的内容先放入T0,然后将T0存入112+a0的地址中（查看TRAPFRAME可以知道这里是A0寄存器内容）
+再继续
+
+# restore kernel stack pointer from p->trapframe->kernel_sp
+        ld sp, 8(a0)
+
+# make tp hold the current hartid, from p->trapframe->kernel_hartid
+        ld tp, 32(a0)
+
+# load the address of usertrap(), p->trapframe->kernel_trap
+        ld t0, 16(a0)
+
+# restore kernel page table from p->trapframe->kernel_satp
+        ld t1, 0(a0)
+将trapframe里的内核栈装入SP，再把HART ID载入TP寄存器
+# restore kernel page table from p->trapframe->kernel_satp
+        ld t1, 0(a0)
+        csrw satp, t1
+        sfence.vma zero, zero
+
+        # a0 is no longer valid, since the kernel page
+        # table does not specially map p->tf.
+
+        # jump to usertrap(), which does not return
+        jr t0
+接下来做的工作就是：将kernel_satp写入STAP寄存器
+并且跳入USERTRAP函数
+
+
+
+TRAP.C:USERTRAP:
+w_stvec((uint64)kernelvec);
+struct proc *p = myproc();
+设置STVEC为KERNELVEC，在TRAP来自USER SYSCALL的时候是没什么作用的，但是如果TRAP来自KERNEL，
+那么他就有作用了，KERNELVEC所指向的地址正是处理KERNELTRAP的服务程序的地址
+之后保存SEPC到TRAPFRAME里的EPC，因为在之后进入SYSCALL函数之前（见LAB2）会开中断，中间要是有新的中断发生就会覆盖掉SEPC，这是不可接受的
+然后在处理完成之后，将EPC+4，指向ECALL的下一条指令，然后在进入USERTRAPRET之前，检查进程有没有被杀死（p->KILLED），或者是不是时间片中断，是否应该让出CPU
+
+来到USERTRAPRET：
+关中断，因为接下来的操作不能被打断，修改STVEC寄存器，因为准备返回USER空间，所以我们要修改成USERVEC地址而不再是之前的KERNELVEC
+准备TRAPFRAME里必须的一些字段， 再修改SSTATUS寄存器，SPP位修改来说明下次进入的是USER MODE 而不是KERNEL MODE
+再然后设置SPIE位，表示允许中断设置，然后将TRAPFRAME作为第一个参数，SATP作为第二个参数执行USERRET函数
+
+USERRET：
+这时候A0寄存器有TRAPFRAME地址，A1有SATP寄存器的值
+接下来切换PAGETABLE，把A1内容写入SATP寄存器,还原
