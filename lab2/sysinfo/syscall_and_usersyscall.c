@@ -37,7 +37,7 @@ nfree(struct sysinfo *sys){
   return 0;
 }
 //in proc.c 
-//count processes that aren't 
+ 
 int 
 nprocess(struct sysinfo *sys){
   if(sys==0){
