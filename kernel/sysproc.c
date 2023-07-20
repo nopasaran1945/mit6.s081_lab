@@ -6,6 +6,7 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+
 uint64
 sys_exit(void)
 {
@@ -40,14 +41,26 @@ sys_wait(void)
 uint64
 sys_sbrk(void)
 {
+  struct proc * p  = myproc();
   int addr;
   int n;
-
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+
+  addr = p->sz;
+
+  if(addr+n<=0)
+    return addr;
+  if(addr+n>=MAXVA)
+    return addr;
+  p->sz += n;
+  if(n<0){
+    uvmdealloc(p->pagetable,addr,p->sz);
+  }
+  
+
+  //if(growproc(n) < 0)
+    //return -1;
   return addr;
 }
 
@@ -56,7 +69,7 @@ sys_sleep(void)
 {
   int n;
   uint ticks0;
-  backtrace();
+
   if(argint(0, &n) < 0)
     return -1;
   acquire(&tickslock);
@@ -93,23 +106,4 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
-}
-uint64
-sys_sigalarm(void){
-  struct proc * p = myproc();
-  uint64 interval =0;
-  (uint64)argaddr(0,&interval);
-  uint64 handler= 0;
-  argaddr(1,&handler);
-  p->alarm_interval = interval;
-  p->handler = handler;
-  return 0;
-  
-}
-uint64
-sys_sigreturn(void){
-  struct proc *p = myproc();
-  p->ifalarm = 0;
-  *p->trapframe = *p->backtpf;
-  return 0;
 }

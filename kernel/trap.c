@@ -49,6 +49,7 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
+  //allocate the block,once scause == 15
   
   if(r_scause() == 8){
     // system call
@@ -59,14 +60,47 @@ usertrap(void)
     // sepc points to the ecall instruction,
     // but we want to return to the next instruction.
     p->trapframe->epc += 4;
+
     // an interrupt will change sstatus &c registers,
     // so don't enable until done with those registers.
     intr_on();
-  
+
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } 
+  else if(r_scause() == 13||r_scause() == 15){
+    uint64 va = r_stval();
+    va = PGROUNDDOWN(va);
+    uint64 pa;
+    uint64 guard_page = p->trapframe->sp;
+    guard_page = PGROUNDDOWN(guard_page);
+    guard_page -= PGSIZE;
+    if(va==guard_page){
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+    p->killed = 1;
+    }
+    else if(va<p->sz&&va>=0){
+      pa=(uint64)kalloc();
+      if(pa==0){
+        p->killed=1;
+      }
+      else{
+      memset((void*)pa,0,PGSIZE);  
+      if(mappages(p->pagetable,va,PGSIZE,pa,PTE_U|PTE_W|PTE_R|PTE_X)!=0){
+        kfree((void*)pa);
+        p->killed=1;
+      }
+      }
+    //vmprint(p->pagetable);  
+    }
+    else if(va>=p->sz){
+      p->killed = 1;
+    }
+  }
+  else {
+    
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
@@ -76,20 +110,9 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2){
-    if(p->alarm_interval!=0){
-    p->passticks++;
-    if(p->alarm_interval == p->passticks&&p->ifalarm==0){
-    p->ifalarm = 1;
-    printf("the breakp of user is:%p\n",p->trapframe->epc);
-    *p->backtpf = *p->trapframe;
-    printf("the stored addr of backup:%p\n",p->backtpf->epc);
-    p->trapframe->epc = (uint64)p->handler;
-    p->passticks = 0;
-    }
-    }
+  if(which_dev == 2)
     yield();
-  }
+
   usertrapret();
 }
 

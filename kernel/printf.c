@@ -132,20 +132,3 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
-void 
-backtrace(){
-  uint64 fp = r_fp();
-  uint64 top = PGROUNDUP(fp);
-  uint64 bottom = PGROUNDDOWN(fp);
-  printf("backtrace:\n");
-  uint64 ra = 0;
-  //you dont need to care about the overflow of stack
-  while(fp<=top&&fp>=bottom){
-  ra = *(uint64*)(fp-8);
-  fp = *(uint64*)(fp-16);
-  if(fp<=top&&fp>=bottom)
-  printf("%p\n",ra);
-  }
-
-  return;
-}
