@@ -16,7 +16,13 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
-  
+extern int memcount[];
+
+extern struct spinlock memlock;
+
+/*
+ * create a direct-map page table for the kernel.
+ */
 void
 kvminit()
 {
@@ -179,14 +185,10 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    if((pte = walk(pagetable, a, 0)) == 0){
-    
-      //panic("uvmunmap: walk");
-      continue;
-    }
+    if((pte = walk(pagetable, a, 0)) == 0)
+      panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
-      //panic("uvmunmap: not mapped");
-      continue;
+      panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -314,25 +316,36 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
-
+  //char *mem;
+  
   for(i = 0; i < sz; i += PGSIZE){
+    //acquire(&memlock);
     if((pte = walk(old, i, 0)) == 0)
-      //panic("uvmcopy: pte should exist");
-      continue;
+      panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
-      //panic("uvmcopy: page not present");
-      continue;
+      panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+    if(((*pte)&PTE_W)!=0){
+    *pte = ((uint64)(*pte)|PTE_COW);
+    *pte = (*pte)&(~PTE_W);
+    }
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    //if((mem = kalloc()) == 0)
+      //goto err;
+    //memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      release(&memlock);
+      //kfree((void*)pa);
       goto err;
     }
+    memcount[INDEX(pa)]++;
+    //release(&memlock);
+    
   }
+  //printf("parent pagetable:\n");
+  //cowvmprint(old);
+  //printf("child pagetable:\n");
+  //cowvmprint(new);
   return 0;
 
  err:
@@ -360,26 +373,25 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
-  struct proc* p = myproc();
-  uint64 sz = p->sz;
+
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0){
-      if(dstva<sz){
-        pa0 = (uint64)kalloc();
-        if(pa0==0)
-        panic("copyin:kalloc");
-        memset((void*)pa0,0,PGSIZE);
-        if(mappages(pagetable,dstva,PGSIZE,pa0,PTE_R|PTE_W|PTE_U|PTE_X)!=0){
-          printf("copyout: can not map");
-          kfree((void*)pa0);
-          p->killed = 1;
-        }
-      }
-      else
+    //if(va0==0)
+    //printf("once hit:0x000000000\n");
+    //pte_t *pte = walk(pagetable,va0,0);
+    
+    //printf("copyout(1):pte:%p,pa:%p\n",*pte,pa0);
+    //if(copycowpage(pagetable,va0)!=0)
+    //return -1;
+  
+    if(ifcowpage(pagetable,va0)==1){
+      if(copycowpage(pagetable,va0)!=0)
       return -1;
     }
+    
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0)
+      return -1;
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -399,27 +411,12 @@ int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
-  struct proc *p = myproc();
-  uint64 sz = p->sz;
+
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0){
-      if(srcva<sz){
-        pa0 = (uint64)kalloc();
-        if(pa0==0)
-        panic("copyin:kalloc");
-        memset((void*)pa0,0,PGSIZE);
-        if(mappages(pagetable,srcva,PGSIZE,pa0,PTE_R|PTE_W|PTE_U|PTE_X)!=0){
-          printf("copyin: cannot map");
-          kfree((void*)pa0);
-          p->killed = 1;
-        }
-    
-      }
-      else
+    if(pa0 == 0)
       return -1;
-    }
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
@@ -474,7 +471,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
-int vmprint(pagetable_t page)
+int cowvmprint(pagetable_t page)
 { 
   if(page==0)
     return -1;
@@ -496,13 +493,36 @@ int vmprint(pagetable_t page)
         printf(".. ..%d: pte %p pa %p \n",j,pte,p0);
           for(int k = 0;k<512;k++){//level 0 
             pte = (pte_t)p0[k];
-            if(pte&PTE_V){  
-            printf(".. .. ..%d: pte %p pa %p\n",k,pte,PTE2PA(pte));
+            if((pte&PTE_V)!=0){  
+              if((pte&PTE_COW)!=0)
+              printf(".. .. ..%d: cow-pte %p cow-pa %p count:%d\n",k,pte,PTE2PA(pte),memcount[INDEX(PTE2PA(pte))]);
+              else
+              printf(".. .. ..%d: pte %p pa %p count:%d\n",k,pte,PTE2PA(pte),memcount[INDEX(PTE2PA(pte))]);
             }
           }
         }
       }
     }
   }
+
   return 0;
 }
+
+int
+ifcowpage(pagetable_t pagetable,uint64 va){
+  if(va>MAXVA)
+  return 0;
+  pte_t *pte;
+  pte = walk(pagetable,va,0);
+  struct proc* p=myproc();
+  if(va>=p->sz)
+  return 0;
+  if(pte ==0)
+  return 0;
+  if(((*pte)&PTE_V)==0)
+  return 0;
+  if(((*pte)&PTE_COW)==0)
+      return 0;
+  return 1;
+}
+

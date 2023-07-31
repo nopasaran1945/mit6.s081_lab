@@ -331,7 +331,7 @@ sfence_vma()
 #define PTE_W (1L << 2)
 #define PTE_X (1L << 3)
 #define PTE_U (1L << 4) // 1 -> user can access
-
+#define PTE_COW (1L<<8)
 // shift a physical address to the right place for a PTE.
 #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
 
@@ -343,7 +343,7 @@ sfence_vma()
 #define PXMASK          0x1FF // 9 bits
 #define PXSHIFT(level)  (PGSHIFT+(9*(level)))
 #define PX(level, va) ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK)
-
+#define INDEX(pa) (((uint64)pa-KERNBASE)>>12)
 // one beyond the highest possible virtual address.
 // MAXVA is actually one bit less than the max allowed by
 // Sv39, to avoid having to sign-extend virtual addresses

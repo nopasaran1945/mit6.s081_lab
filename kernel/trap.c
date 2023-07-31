@@ -10,7 +10,7 @@ struct spinlock tickslock;
 uint ticks;
 
 extern char trampoline[], uservec[], userret[];
-
+extern int memcount[];
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -49,7 +49,6 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  //allocate the block,once scause == 15
   
   if(r_scause() == 8){
     // system call
@@ -68,42 +67,21 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } 
-  else if(r_scause() == 13||r_scause() == 15){
-    uint64 va = r_stval();
-    va = PGROUNDDOWN(va);
-    uint64 pa;
-    uint64 guard_page = p->trapframe->sp;
-    guard_page = PGROUNDDOWN(guard_page);
-    guard_page -= PGSIZE;
-    if(va==guard_page){
-      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
-    }
-    else if(va<p->sz&&va>=0){
-      pa=(uint64)kalloc();
-      if(pa==0){
-        p->killed=1;
-      }
-      else{
-      memset((void*)pa,0,PGSIZE);  
-      if(mappages(p->pagetable,va,PGSIZE,pa,PTE_U|PTE_W|PTE_R|PTE_X)!=0){
-        kfree((void*)pa);
-        p->killed=1;
-      }
-      }
-    //vmprint(p->pagetable);  
-    }
-    else if(va>=p->sz){
+  } else {
+    if(r_scause()==15&&(ifcowpage(myproc()->pagetable,r_stval())==1)){
+      //copy-on-write fork page 
+      struct proc* p = myproc();
+      uint64 va = r_stval();
+      if(copycowpage(p->pagetable,va)<0){
+      printf("the pid of killed process:%d\n",p->pid);
       p->killed = 1;
-    }
-  }
-  else {
-    
+      }
+      }
+    else{
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
+    }
   }
 
   if(p->killed)
@@ -179,6 +157,11 @@ kerneltrap()
   if((which_dev = devintr()) == 0){
     printf("scause %p\n", scause);
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
+    pte_t *pte = walk(myproc()->pagetable,r_stval(),0);
+    //vmprint(myproc()->pagetable);
+    if(pte!=0)
+    printf("pte : %p\n",*pte);
+    printf("count : %d",memcount[INDEX((uint64)(PTE2PA(*pte)))]);
     panic("kerneltrap");
   }
 
