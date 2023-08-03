@@ -1,0 +1,27 @@
+关于kernel 内的锁：
+Q：为什么操作系统需要锁
+A：现代的处理器大多是多核，因此如果你要管理这些CPU，那么你得处理好多个处理器并发运行带来的各种可能的矛盾情景，以便其运行的结果处在
+期望的情况内，但是同时锁也会限制并发的性能，因此我们需要仔细的考量这其中的机制问题。https://github.com/nopasaran1945/mit6.s081_lab/tree/main/lab1
+当同一份共享数据被读写的时候如果没有锁，那么会产生一种叫race condition 的情况，具体是什么，接下来的例子会展示这一情景：
+kalloc.c：
+kfree会将传递的参数(kfree((void*)pa))作为物理地址然后释放，他会将这一个内存页放入freelist内，kalloc就会在被调用时将内存页取出（freelist的头）
+void
+kfree(void *pa)
+{
+  struct run *r;
+
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("kfree");
+
+  // Fill with junk to catch dangling refs.
+  memset(pa, 1, PGSIZE);
+
+  r = (struct run*)pa;
+
+  acquire(&kmem.lock);
+  r->next = kmem.freelist;
+  kmem.freelist = r;
+  release(&kmem.lock);
+}
+可以看到的是，在kfree 和 kalloc 对freelist进行操作的时候，他会acquire一个kmemlock，然后在完成操作的时候release kmemlock。
+而我们会使用lock的时候，acquire和release中间的这一段代码会不中断的执行（原子操作），我们将这一片区域叫做critical section。
