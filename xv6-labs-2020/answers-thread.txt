@@ -1,0 +1,3 @@
+ANSWER:
+since there are race condition happenning if two threads try to put the value into the same bucket.when they pass the loop at almost same time,they get the same
+variable e,after inserting, one of the value will be covered by another,that's why the key missing.
