@@ -1,0 +1,28 @@
+spinlock是最基本的锁，但是在一些特殊的场景spinlock并不足够，因此xv6提供了另外一种来帮助系统完成coordination的锁机制，也就是sleep lock.
+接下来我们来讨论sleeplock的实现场景.
+
+void 
+test(){
+  ...
+  acquire(&condition_lock);//condition_lock是关于检测唤醒sleep的条件变量的锁
+  while(condition == 0){
+  release(&conditon_lock);//在此时得释放，不然进入sleeping 后切换进程的后，wakeup发现conditionlock仍然被持有，就无法对condition进行检测
+  sleep(channel);//我们假设sleep此时只附带channel作为wakeup检测时的一个检测条件
+  acquire(&condition_lock);
+  }
+  release(&condition_lock);
+  ...
+  
+}
+问题就出在，release和sleep中间的空窗期，假如此时线程被中断，并且运行其他线程的时候发生了wakeup，wakeup会找到对应channel以及sleeping的进程，但是这时候还没有sleep，wakeup没有唤醒任何进程，一旦切换会原来sleep所在
+的进程，这个进程又会执行sleep，不会有任何的wakeup再来唤醒他。这是我们不希望发生的，所以我们在这里希望的事情是，release和sleep能够原子的发生，再或者，release后，不会有任何的wakeup来唤醒这个进程。
+void
+sleep(void *channel,struct spinlock *lk){
+struct proc *p = myproc();
+    if(lk!=p->lock){
+      acquire(p->lock);
+      release(lk);
+    }
+    ....
+}
+可以看到的是，sleep首先对p->lock进行上锁，这样就确保了不会有wakeup在此时先对这个进程进行唤醒。
