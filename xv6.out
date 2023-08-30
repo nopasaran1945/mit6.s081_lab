@@ -1,0 +1,9 @@
+
+xv6 kernel is booting
+
+hart 1 starting
+hart 2 starting
+init: starting sh
+$ bcachetest
+start test0
+qemu-system-riscv64: terminating on signal 2
