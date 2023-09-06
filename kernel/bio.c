@@ -99,7 +99,7 @@ search_move_buf(uint dev, uint blockno){
   uint i = blockno%NBUKET;
   struct buf* minbuf = 0;
   uint mintime = 0xffffffff;
-  uint minbucket = 0;
+  //uint minbucket = 0;
   acquire(&bucketlock[i]);
   //stage 1 
   for(struct buf *b = bucket[i].next;b!=0;b=b->next){
@@ -113,40 +113,48 @@ search_move_buf(uint dev, uint blockno){
   }
   release(&bucketlock[i]);
   //stage 2
-  uint start = 0;
-  uint end = 0;
+  acquire(&bcache.lock);
+  acquire(&bucketlock[i]);
+  for(struct buf *b = bucket[i].next;b!=0;b=b->next){
+    if(b->blockno==blockno&&b->dev==dev){
+      b->refcnt ++;
+      b->timestamp = getticks();
+      release(&bucketlock[i]);
+      acquiresleep(&b->lock);
+      return b;
+    }
+  }
+  release(&bucketlock[i]);
+  uint beforebucket = -1;
+  uint iffind = 0;
   for(int j = 0;j<NBUKET;j++){
       acquire(&bucketlock[j]);
+      iffind = 0;
   for(struct buf* b = bucket[j].next;b!=0;b = b->next){
       //lock the bucket
-      
       if(b->timestamp<mintime&&(b->refcnt==0)){
         //find a free buffer cache 
         mintime = b->timestamp;
         minbuf = b;  
-        end = j;
-        for(int k = start;k<end;k++){
-          if(k!=i){
-            release(&bucketlock[k]);
-          }
-        }
-        start = end;
+        iffind = 1;
+        break;
       }
-      //dont release 
+    }
+    if(!iffind)
+    release(&bucketlock[j]);
+    else{
+      if(beforebucket!=-1)
+      release(&bucketlock[beforebucket]);
+      beforebucket = j;
     }
   }
   if(minbuf!=0){
-    minbucket = minbuf->blockno%NBUKET;
-    for(int k = end;k<NBUKET;k++){
-      if(k!=i&&k!=minbucket)
-      release(&bucketlock[k]);
-    }
+    //minbucket = minbuf->blockno%NBUKET;
     //remove minbuf from bucket
     minbuf->prev->next = minbuf->next;
     if(minbuf->next!=0)
     minbuf->next->prev = minbuf->prev;
-    if(minbucket!=i)
-    release(&bucketlock[minbucket]);
+   
     minbuf->next = bucket[i].next;
     minbuf->prev = &bucket[i];
     if(minbuf->next!=0)
@@ -158,10 +166,12 @@ search_move_buf(uint dev, uint blockno){
     minbuf->refcnt = 1;
     minbuf->valid = 0;
     minbuf->timestamp = getticks();
-    release(&bucketlock[i]);
+    
+    release(&bucketlock[beforebucket]);
+    release(&bcache.lock);
     acquiresleep(&minbuf->lock);
     //printbucket();
-    return minbuf;
+    return minbuf; 
   }
     panic("bet:search and move");
 }
@@ -259,6 +269,7 @@ brelse(struct buf *b)
     if(b->next!=0)
     b->next->prev = b;
     b->prev->next = b;
+    b->timestamp = getticks();
   }
   release(&bucketlock[i]);
   //release(&bcache.lock);
