@@ -1,0 +1,19 @@
+//loggging part 
+xv6对logging层进行设计的原因在于保证写入磁盘的操作序列是原子的，这样就不会在崩溃时出现各种各样奇怪的不一致性结果,linux对日志操作有着额外的optimization但是我们
+暂时在下一节再来谈这个。
+从前面的磁盘块的文件系统组织,我们可以看到在superblock之后就是logging block。header块后跟着连续的日志块，或者我们称作更新块副本。header包含了一个扇区号数组，每个扇区号
+都会对应一个logging block,header包含日志块的数量。磁盘上header 块中的数量要么是0,表示日志内没有事务，要不然就是非0，日志块内还有一个完整的提交事务，并且包含
+指定数量的日志块。logging 的基本想法大概类似buffer，对整个文件系统进行写入操作并不会直接操作virtio disk而是先写入log,
+在一个事务下的所有更新操作完成之前是不可以将对应log 下的count抹除的，这一点有什么好处呢。来分析接下来的一个流程
+write 33 // the first syscall to write the root inode(//type dir)
+write 45  //set bit map 
+write 256
+可以确定一点的是，将这些全部挂在log下，无论在哪一步Crash，系统都会把这些进行重写，也就是说，不影响这一系列操作的原子性。并且也不会影响其他的disk block。
+整体的流程大概如下：
+log write ：将系统调用对block的操作和写入数据 写在 log block 内。
+commit op:在某一个时间点中，当文件系统的操作结束之后， logging 可以commit 文件系统的操作,并且记录操作的数量。
+install log:将log的block content移到调用原本要写入的block。
+clean log:一旦以上系统调用的操作全部写完，OK，那么就将操作计数清0。
+
+xv6的log实现比较的简单，如下：
+header block : 
