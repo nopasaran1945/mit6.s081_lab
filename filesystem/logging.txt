@@ -15,5 +15,21 @@ commit op:在某一个时间点中，当文件系统的操作结束之后， log
 install log:将log的block content移到调用原本要写入的block。
 clean log:一旦以上系统调用的操作全部写完，OK，那么就将操作计数清0。
 
-xv6的log实现比较的简单，如下：
-header block : 
+清理下整体流程，以sysopen为例。begin_op()代表事务的开始，end_op()代表事务的结束。
+可以确定的一点是，中间所有试图写磁盘的操作最终都会先写到Log内，来看看具体的代码：
+ialloc(kernel/fs.c)内并不具有直接bwrite的函数，而是log_write();
+log_write();
+log write 的代码最开始的错误判断跳过，来到正常区域
+//log absorbtion
+首先Log write试图在logheader里搜索，如果已经有这个block的buffer在事务中了，那么不需要再重复，直接跳过就好，将前后的对同一个磁盘块的操作合并了。
+这就是absorbtion,如果事务中没有对这个blockno对应的磁盘块的写入请求操作，那么就会增加header 的n，然后用bpin来（固定），这是为了防止当buffer cache满后撤回block时，假如选择到了事务中的block块，那么在还没完成其他操作时就会写磁盘，这种情况是我们不允许发生的。
+//记住一个点，我们上述的logwrite全部是在内存内的数据结构修改。
+endop():
+commit:
+write_log():函数就干了一件事情，遍历header，并且读一个log block buf,就写一个buf到log block内，此时，请注意，headerblock没有改变，如果在write head之前crash
+那么等于没提交事务，因为内存中的log block buf和header已经掉电丢失了。而header也没被写入，因此，事务等于没发生。
+write_head():commmit point 
+这个时间点后:write_head已经向log header的磁盘块传输完了，可以说即便crash，file system也能察觉到header内有transactions
+仍然会跑去传输。
+至于install_trans，就没太多需要讲的，把log对应的块送入就好了。
+接下来，来看看initlog,发生crash后的recovering function。
