@@ -10,7 +10,7 @@ sstatus：里边有个SIE位来控制开中断与关中断（除了定时器中�
 
 the whole progress of the usertrap:
 在最开始首先是RISC-V的硬件架构开始工作，在这里是用的一个特殊的指令：ECALL ，它完成的工作相当简单：
-1：切换状态：USER MODE 到 SUPERVISOR MODE（在408里直接叫内核态）
+1：切换状态：USER MODE 到 SUPERVISOR MODE
 2：将PC保存到SEPC 
 3: 将STVEC寄存器的内容拷贝到PC寄存器
 在之前LAB3和PAGETABLE相关的课程里边可以看到每个进程用户页表最上面的虚拟地址映射的是TRAMPOLINE PAGE
